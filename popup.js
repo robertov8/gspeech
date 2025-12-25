@@ -4,39 +4,101 @@ document.addEventListener("DOMContentLoaded", async () => {
   const settingsBtn = document.getElementById("settings-btn");
   const settingsPanel = document.getElementById("settings-panel");
   const contextKeyInput = document.getElementById("api-key");
+  const voiceSelect = document.getElementById("voice-select");
+  const languageSelect = document.getElementById("language-select");
   const saveKeyBtn = document.getElementById("save-key");
   const statusMessage = document.getElementById("status-message");
   const loader = document.getElementById("loader");
 
-  // Load saved API key
-  chrome.storage.local.get(["geminiApiKey"], (result) => {
-    if (result.geminiApiKey) {
-      contextKeyInput.value = result.geminiApiKey;
-    } else {
-      showStatus(
-        "Por favor, configure sua API Key no ícone de engrenagem.",
-        "error"
-      );
-      settingsPanel.classList.remove("hidden");
-    }
+  const voices = [
+    { name: "Zephyr", desc: "Bright" },
+    { name: "Puck", desc: "Upbeat" },
+    { name: "Charon", desc: "Informativa" },
+    { name: "Kore", desc: "Firme" },
+    { name: "Fenrir", desc: "Excitável" },
+    { name: "Leda", desc: "Juventude" },
+    { name: "Orus", desc: "Firm" },
+    { name: "Aoede", desc: "Breezy" },
+    { name: "Callirrhoe", desc: "Tranquila" },
+    { name: "Autonoe", desc: "Bright" },
+    { name: "Enceladus", desc: "Breathy" },
+    { name: "Iapetus", desc: "Limpar" },
+    { name: "Umbriel", desc: "Tranquilo" },
+    { name: "Algieba", desc: "Suave" },
+    { name: "Despina", desc: "Smooth" },
+    { name: "Erinome", desc: "Limpar" },
+    { name: "Algenib", desc: "Gravelly" },
+    { name: "Rasalgethi", desc: "Informativa" },
+    { name: "Laomedeia", desc: "Upbeat" },
+    { name: "Achernar", desc: "Suave" },
+    { name: "Alnilam", desc: "Firme" },
+    { name: "Schedar", desc: "Even" },
+    { name: "Gacrux", desc: "Adulto" },
+    { name: "Pulcherrima", desc: "Avançar" },
+    { name: "Achird", desc: "Amigável" },
+    { name: "Zubenelgenubi", desc: "Casual" },
+    { name: "Vindemiatrix", desc: "Gentil" },
+    { name: "Sadachbia", desc: "Lively" },
+    { name: "Sadaltager", desc: "Conhecedor" },
+    { name: "Sulafat", desc: "Quente" },
+  ];
+
+  // Populate voice select
+  voices.forEach((voice) => {
+    const option = document.createElement("option");
+    option.value = voice.name;
+    option.textContent = `${voice.name} (${voice.desc})`;
+    voiceSelect.appendChild(option);
   });
+
+  // Load saved settings
+  chrome.storage.local.get(
+    ["geminiApiKey", "selectedVoice", "selectedLanguage"],
+    (result) => {
+      if (result.geminiApiKey) {
+        contextKeyInput.value = result.geminiApiKey;
+      } else {
+        showStatus(
+          "Por favor, configure sua API Key no ícone de engrenagem.",
+          "error"
+        );
+        settingsPanel.classList.remove("hidden");
+      }
+
+      if (result.selectedVoice) {
+        voiceSelect.value = result.selectedVoice;
+      } else {
+        voiceSelect.value = "Aoede"; // Default
+      }
+
+      if (result.selectedLanguage) {
+        languageSelect.value = result.selectedLanguage;
+      }
+    }
+  );
 
   // Toggle settings
   settingsBtn.addEventListener("click", () => {
     settingsPanel.classList.toggle("hidden");
   });
 
-  // Save API key
+  // Save settings
   saveKeyBtn.addEventListener("click", () => {
     const key = contextKeyInput.value.trim();
+    const voice = voiceSelect.value;
+    const language = languageSelect.value;
+
     if (key) {
-      chrome.storage.local.set({ geminiApiKey: key }, () => {
-        showStatus("API Key salva com sucesso!", "success");
-        setTimeout(() => {
-          settingsPanel.classList.add("hidden");
-          showStatus("", "");
-        }, 1500);
-      });
+      chrome.storage.local.set(
+        { geminiApiKey: key, selectedVoice: voice, selectedLanguage: language },
+        () => {
+          showStatus("Configurações salvas!", "success");
+          setTimeout(() => {
+            settingsPanel.classList.add("hidden");
+            showStatus("", "");
+          }, 1500);
+        }
+      );
     }
   });
 
@@ -67,10 +129,13 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   // Play button logic
   playBtn.addEventListener("click", async () => {
-    const text = capturedTextInput.value.trim();
+    let text = capturedTextInput.value.trim();
     if (!text) return;
 
     const apiKey = contextKeyInput.value.trim();
+    const selectedVoice = voiceSelect.value || "Aoede";
+    const selectedLanguage = languageSelect.value || "pt-BR";
+
     if (!apiKey) {
       showStatus("API Key é necessária.", "error");
       settingsPanel.classList.remove("hidden");
@@ -81,6 +146,19 @@ document.addEventListener("DOMContentLoaded", async () => {
     showStatus("", "");
 
     try {
+      // Translation Step
+      if (selectedLanguage === "en") {
+        showStatus("Traduzindo para Português...", "success");
+        const translatedText = await translateText(text, apiKey);
+        if (translatedText) {
+          text = translatedText;
+          capturedTextInput.value = text; // Update UI with translated text
+          showStatus("Tradução concluída. Gerando áudio...", "success");
+        } else {
+          throw new Error("Falha na tradução.");
+        }
+      }
+
       // Note: The user specified 'gemini-2.5-flash-preview-tts'.
       // We will assume this model supports the 'generateContent' method and returns audio data.
       // If there is a specific REST endpoint for TTS, we would use that.
@@ -106,7 +184,7 @@ document.addEventListener("DOMContentLoaded", async () => {
               speechConfig: {
                 voiceConfig: {
                   prebuiltVoiceConfig: {
-                    voiceName: "Aoede",
+                    voiceName: selectedVoice,
                   },
                 },
               },
@@ -248,6 +326,42 @@ document.addEventListener("DOMContentLoaded", async () => {
   function writeString(view, offset, string) {
     for (let i = 0; i < string.length; i++) {
       view.setUint8(offset + i, string.charCodeAt(i));
+    }
+  }
+
+  async function translateText(text, apiKey) {
+    try {
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            contents: [
+              {
+                parts: [
+                  {
+                    text: `Translate the following text to Portuguese (Brazil). Return ONLY the translated text, nothing else:\n\n${text}`,
+                  },
+                ],
+              },
+            ],
+          }),
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error("Translation API failed");
+      }
+
+      const data = await response.json();
+      const translatedText = data.candidates?.[0]?.content?.parts?.[0]?.text;
+      return translatedText ? translatedText.trim() : null;
+    } catch (e) {
+      console.error("Translation error:", e);
+      throw e;
     }
   }
 
