@@ -1,11 +1,14 @@
 document.addEventListener("DOMContentLoaded", async () => {
   const capturedTextInput = document.getElementById("captured-text");
+  const translatedContainer = document.getElementById("translated-container");
+  const translatedTextInput = document.getElementById("translated-text");
   const playBtn = document.getElementById("play-btn");
   const settingsBtn = document.getElementById("settings-btn");
   const settingsPanel = document.getElementById("settings-panel");
   const contextKeyInput = document.getElementById("api-key");
   const voiceSelect = document.getElementById("voice-select");
   const languageSelect = document.getElementById("language-select");
+  const themeSelect = document.getElementById("theme-select");
   const saveKeyBtn = document.getElementById("save-key");
   const statusMessage = document.getElementById("status-message");
   const loader = document.getElementById("loader");
@@ -53,7 +56,13 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   // Load saved settings and last text
   chrome.storage.local.get(
-    ["geminiApiKey", "selectedVoice", "selectedLanguage", "lastCapturedText"],
+    [
+      "geminiApiKey",
+      "selectedVoice",
+      "selectedLanguage",
+      "lastCapturedText",
+      "theme",
+    ],
     (result) => {
       if (result.geminiApiKey) {
         contextKeyInput.value = result.geminiApiKey;
@@ -75,6 +84,15 @@ document.addEventListener("DOMContentLoaded", async () => {
         languageSelect.value = result.selectedLanguage;
       }
 
+      updateUIForLanguage(); // Init state
+
+      if (result.theme) {
+        themeSelect.value = result.theme;
+        applyTheme(result.theme);
+      } else {
+        applyTheme("system");
+      }
+
       // Initialize with saved text if available
       if (result.lastCapturedText) {
         capturedTextInput.value = result.lastCapturedText;
@@ -82,6 +100,25 @@ document.addEventListener("DOMContentLoaded", async () => {
       }
     }
   );
+
+  // Apply theme function
+  function applyTheme(theme) {
+    if (theme === "system") {
+      const isDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+      document.body.setAttribute("data-theme", isDark ? "dark" : "light");
+    } else {
+      document.body.setAttribute("data-theme", theme);
+    }
+  }
+
+  // Listen for system theme changes if 'system' is selected
+  window
+    .matchMedia("(prefers-color-scheme: dark)")
+    .addEventListener("change", (e) => {
+      if (themeSelect.value === "system") {
+        document.body.setAttribute("data-theme", e.matches ? "dark" : "light");
+      }
+    });
 
   // Toggle settings
   settingsBtn.addEventListener("click", () => {
@@ -93,10 +130,17 @@ document.addEventListener("DOMContentLoaded", async () => {
     const key = contextKeyInput.value.trim();
     const voice = voiceSelect.value;
     const language = languageSelect.value;
+    const theme = themeSelect.value;
 
     if (key) {
+      applyTheme(theme); // Apply immediately
       chrome.storage.local.set(
-        { geminiApiKey: key, selectedVoice: voice, selectedLanguage: language },
+        {
+          geminiApiKey: key,
+          selectedVoice: voice,
+          selectedLanguage: language,
+          theme: theme,
+        },
         () => {
           showStatus("Configurações salvas!", "success");
           setTimeout(() => {
@@ -156,157 +200,69 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     setLoading(true);
     showStatus("", "");
+    // Clear previous translation
+    translatedTextInput.value = "";
 
-    try {
-      // Translation Step
-      if (selectedLanguage === "en") {
-        showStatus("Traduzindo para Português...", "success");
-        const translatedText = await translateText(text, apiKey);
-        if (translatedText) {
-          text = translatedText;
-          capturedTextInput.value = text; // Update UI with translated text
-          showStatus("Tradução concluída. Gerando áudio...", "success");
+    // Dispatch to background for full processing
+    chrome.runtime.sendMessage(
+      {
+        type: "START_PROCESS",
+        payload: {
+          text: text,
+          apiKey: apiKey,
+          voice: selectedVoice,
+          language: selectedLanguage,
+        },
+      },
+      (response) => {
+        if (chrome.runtime.lastError) {
+          showStatus(
+            `Erro ao iniciar: ${chrome.runtime.lastError.message}`,
+            "error"
+          );
+          setLoading(false);
         } else {
-          throw new Error("Falha na tradução.");
+          // Task started successfully
+          showStatus("Processando em segundo plano...", "success");
         }
       }
+    );
+  });
 
-      // Note: The user specified 'gemini-2.5-flash-preview-tts'.
-      // We will assume this model supports the 'generateContent' method and returns audio data.
-      // If there is a specific REST endpoint for TTS, we would use that.
-      // Based on standard Gemini API usage, we can request audio as a response modality.
-      // However, usually one needs to instruct the model to "speak" or return audio.
-      // Since it's a specific TTS model, maybe it behaves like the standard 'generateContent'.
+  // Listen for status updates from background
+  chrome.runtime.onMessage.addListener((msg) => {
+    if (msg.type === "STATUS_UPDATE") {
+      showStatus(msg.data.message, msg.data.type);
 
-      const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${apiKey}`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            contents: [
-              {
-                parts: [{ text: text }],
-              },
-            ],
-            generationConfig: {
-              responseModalities: ["AUDIO"],
-              speechConfig: {
-                voiceConfig: {
-                  prebuiltVoiceConfig: {
-                    voiceName: selectedVoice,
-                  },
-                },
-              },
-            },
-          }),
-        }
-      );
-
-      if (!response.ok) {
-        const errData = await response.json();
-        throw new Error(
-          errData.error?.message || "Erro na requisição para Gemini"
-        );
+      // Stop loading if error or explicitly finished
+      if (msg.data.type === "error" || msg.data.finished) {
+        setLoading(false);
       }
-
-      const data = await response.json();
-
-      // We expect the response to contain audio content.
-      // Usually it's in candidates[0].content.parts[0].inlineData.data (base64)
-      // OR candidates[0].content.parts[0].text if it failed to generate audio.
-      // Let's inspect the structure safely.
-
-      const candidate = data.candidates && data.candidates[0];
-      const part =
-        candidate &&
-        candidate.content &&
-        candidate.content.parts &&
-        candidate.content.parts[0];
-
-      if (
-        part &&
-        part.inlineData &&
-        (part.inlineData.mimeType.startsWith("audio") || true) // API might return generic type for PCM
-      ) {
-        // Delegate playback to background/offscreen
-        showStatus(
-          "Enviando áudio para reprodução em segundo plano...",
-          "success"
-        );
-        chrome.runtime.sendMessage(
-          {
-            type: "PLAY_AUDIO",
-            data: part.inlineData.data,
-          },
-          (response) => {
-            if (chrome.runtime.lastError) {
-              showStatus(
-                `Erro ao enviar áudio: ${chrome.runtime.lastError.message}`,
-                "error"
-              );
-            } else if (response && response.success) {
-              showStatus("Reproduzindo...", "success");
-            } else {
-              showStatus("Falha ao iniciar reprodução.", "error");
-            }
-          }
-        );
-      } else if (part && part.text) {
-        // Fallback or error if it returned text instead
-        console.warn("Model returned text:", part.text);
-        showStatus(
-          "O modelo retornou texto em vez de áudio. Verifique se o modelo está correto.",
-          "error"
-        );
-      } else {
-        throw new Error("Formato de resposta inesperado do Gemini.");
+    } else if (msg.type === "TRANSLATION_COMPLETE") {
+      if (translatedTextInput && translatedContainer) {
+        translatedTextInput.value = msg.data.text;
+        translatedContainer.classList.remove("hidden");
       }
-    } catch (error) {
-      console.error(error);
-      showStatus(`Erro: ${error.message}`, "error");
-    } finally {
-      setLoading(false);
     }
   });
 
-  async function translateText(text, apiKey) {
-    try {
-      const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            contents: [
-              {
-                parts: [
-                  {
-                    text: `Translate the following text to Portuguese (Brazil). Return ONLY the translated text, nothing else:\n\n${text}`,
-                  },
-                ],
-              },
-            ],
-          }),
-        }
-      );
-
-      if (!response.ok) {
-        throw new Error("Translation API failed");
-      }
-
-      const data = await response.json();
-      const translatedText = data.candidates?.[0]?.content?.parts?.[0]?.text;
-      return translatedText ? translatedText.trim() : null;
-    } catch (e) {
-      console.error("Translation error:", e);
-      throw e;
+  // Toggle translated text area based on language selection
+  function updateUIForLanguage() {
+    if (languageSelect.value === "en") {
+      // We act optimistically; we show it empty or keep it hidden until translation arrives?
+      // User asked for a textarea "if language is English".
+      // Let's show the container but maybe empty.
+      translatedContainer.classList.remove("hidden");
+    } else {
+      translatedContainer.classList.add("hidden");
+      translatedTextInput.value = "";
     }
   }
+
+  languageSelect.addEventListener("change", updateUIForLanguage);
+
+  // Also call on init
+  // (We'll add this call inside the storage get callback)
 
   function setLoading(isLoading) {
     if (isLoading) {
