@@ -62,6 +62,8 @@ document.addEventListener("DOMContentLoaded", async () => {
       "selectedLanguage",
       "lastCapturedText",
       "theme",
+      "lastTranslatedText",
+      "lastStatus",
     ],
     (result) => {
       if (result.geminiApiKey) {
@@ -97,6 +99,15 @@ document.addEventListener("DOMContentLoaded", async () => {
       if (result.lastCapturedText) {
         capturedTextInput.value = result.lastCapturedText;
         playBtn.disabled = false;
+      }
+
+      if (result.lastTranslatedText) {
+        translatedTextInput.value = result.lastTranslatedText;
+        translatedContainer.classList.remove("hidden");
+      }
+
+      if (result.lastStatus) {
+        showStatus(result.lastStatus, "success");
       }
     }
   );
@@ -200,8 +211,11 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     setLoading(true);
     showStatus("", "");
-    // Clear previous translation
+    // Clear previous translation locally
     translatedTextInput.value = "";
+
+    // Clear persisted state
+    chrome.storage.local.remove(["lastTranslatedText", "lastStatus"]);
 
     // Dispatch to background for full processing
     chrome.runtime.sendMessage(
@@ -241,6 +255,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     } else if (msg.type === "TRANSLATION_COMPLETE") {
       if (translatedTextInput && translatedContainer) {
         translatedTextInput.value = msg.data.text;
+        chrome.storage.local.set({ lastTranslatedText: msg.data.text });
         translatedContainer.classList.remove("hidden");
       }
     }
@@ -276,6 +291,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   function showStatus(msg, type) {
     statusMessage.textContent = msg;
+    chrome.storage.local.set({ lastStatus: msg });
     statusMessage.style.color = type === "error" ? "#d93025" : "#188038";
   }
 });
