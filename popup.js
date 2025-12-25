@@ -13,7 +13,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   const voices = [
     { name: "Zephyr", desc: "Bright" },
     { name: "Puck", desc: "Upbeat" },
-    { name: "Charon", desc: "Informativa" },
+    // { name: "Charon", desc: "Informativa" },
     { name: "Kore", desc: "Firme" },
     { name: "Fenrir", desc: "Excitável" },
     { name: "Leda", desc: "Juventude" },
@@ -51,9 +51,9 @@ document.addEventListener("DOMContentLoaded", async () => {
     voiceSelect.appendChild(option);
   });
 
-  // Load saved settings
+  // Load saved settings and last text
   chrome.storage.local.get(
-    ["geminiApiKey", "selectedVoice", "selectedLanguage"],
+    ["geminiApiKey", "selectedVoice", "selectedLanguage", "lastCapturedText"],
     (result) => {
       if (result.geminiApiKey) {
         contextKeyInput.value = result.geminiApiKey;
@@ -73,6 +73,12 @@ document.addEventListener("DOMContentLoaded", async () => {
 
       if (result.selectedLanguage) {
         languageSelect.value = result.selectedLanguage;
+      }
+
+      // Initialize with saved text if available
+      if (result.lastCapturedText) {
+        capturedTextInput.value = result.lastCapturedText;
+        playBtn.disabled = false;
       }
     }
   );
@@ -115,11 +121,17 @@ document.addEventListener("DOMContentLoaded", async () => {
       });
 
       if (result && result.trim()) {
-        capturedTextInput.value = result.trim();
+        const newText = result.trim();
+        capturedTextInput.value = newText;
         playBtn.disabled = false;
+        // Save new text
+        chrome.storage.local.set({ lastCapturedText: newText });
       } else {
-        capturedTextInput.placeholder =
-          "Nenhum texto selecionado. Selecione algo na página e reabra a extensão.";
+        // Only show placeholder if valid text isn't already present (from storage)
+        if (!capturedTextInput.value) {
+          capturedTextInput.placeholder =
+            "Nenhum texto selecionado. Selecione algo na página e reabra a extensão.";
+        }
       }
     }
   } catch (err) {
@@ -219,8 +231,29 @@ document.addEventListener("DOMContentLoaded", async () => {
         part.inlineData &&
         (part.inlineData.mimeType.startsWith("audio") || true) // API might return generic type for PCM
       ) {
-        // The API returns raw PCM (s16le, 24kHz)
-        playPcmAudio(part.inlineData.data);
+        // Delegate playback to background/offscreen
+        showStatus(
+          "Enviando áudio para reprodução em segundo plano...",
+          "success"
+        );
+        chrome.runtime.sendMessage(
+          {
+            type: "PLAY_AUDIO",
+            data: part.inlineData.data,
+          },
+          (response) => {
+            if (chrome.runtime.lastError) {
+              showStatus(
+                `Erro ao enviar áudio: ${chrome.runtime.lastError.message}`,
+                "error"
+              );
+            } else if (response && response.success) {
+              showStatus("Reproduzindo...", "success");
+            } else {
+              showStatus("Falha ao iniciar reprodução.", "error");
+            }
+          }
+        );
       } else if (part && part.text) {
         // Fallback or error if it returned text instead
         console.warn("Model returned text:", part.text);
@@ -238,96 +271,6 @@ document.addEventListener("DOMContentLoaded", async () => {
       setLoading(false);
     }
   });
-
-  function playPcmAudio(base64String) {
-    showStatus("Processando áudio PCM...", "success");
-
-    try {
-      const binaryString = atob(base64String);
-      const pcmData = new Uint8Array(binaryString.length);
-      for (let i = 0; i < binaryString.length; i++) {
-        pcmData[i] = binaryString.charCodeAt(i);
-      }
-
-      // Add WAV header
-      // Specs from user example: s16le, 24000Hz, 1 channel
-      const wavData = addWavHeader(pcmData, 24000, 1, 16);
-      const blob = new Blob([wavData], { type: "audio/wav" });
-      const url = URL.createObjectURL(blob);
-
-      const audio = new Audio(url);
-
-      const playPromise = audio.play();
-
-      if (playPromise !== undefined) {
-        playPromise
-          .then(() => {
-            showStatus("Reproduzindo áudio...", "success");
-          })
-          .catch((error) => {
-            console.error("Playback failed:", error);
-            showStatus(
-              `Erro ao reproduzir: ${error.name} - ${error.message}`,
-              "error"
-            );
-          });
-      }
-
-      audio.onended = () => {
-        URL.revokeObjectURL(url);
-        showStatus("Reprodução concluída.", "success");
-      };
-    } catch (e) {
-      showStatus(`Erro ao processar áudio: ${e.message}`, "error");
-    }
-  }
-
-  function addWavHeader(pcmData, sampleRate, numChannels, bitsPerSample) {
-    const headerLength = 44;
-    const dataLength = pcmData.length;
-    const fileSize = dataLength + headerLength - 8;
-    const buffer = new ArrayBuffer(headerLength + dataLength);
-    const view = new DataView(buffer);
-
-    // RIFF identifier
-    writeString(view, 0, "RIFF");
-    // file length
-    view.setUint32(4, fileSize, true);
-    // RIFF type
-    writeString(view, 8, "WAVE");
-    // format chunk identifier
-    writeString(view, 12, "fmt ");
-    // format chunk length
-    view.setUint32(16, 16, true);
-    // sample format (raw)
-    view.setUint16(20, 1, true);
-    // channel count
-    view.setUint16(22, numChannels, true);
-    // sample rate
-    view.setUint32(24, sampleRate, true);
-    // byte rate (sample rate * block align)
-    view.setUint32(28, sampleRate * numChannels * (bitsPerSample / 8), true);
-    // block align (channel count * bytes per sample)
-    view.setUint16(32, numChannels * (bitsPerSample / 8), true);
-    // bits per sample
-    view.setUint16(34, bitsPerSample, true);
-    // data chunk identifier
-    writeString(view, 36, "data");
-    // data chunk length
-    view.setUint32(40, dataLength, true);
-
-    // Write PCM data
-    const pcmDataArray = new Uint8Array(buffer, headerLength);
-    pcmDataArray.set(pcmData);
-
-    return buffer;
-  }
-
-  function writeString(view, offset, string) {
-    for (let i = 0; i < string.length; i++) {
-      view.setUint8(offset + i, string.charCodeAt(i));
-    }
-  }
 
   async function translateText(text, apiKey) {
     try {

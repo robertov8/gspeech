@@ -3,7 +3,10 @@
   "name": "Gemini TTS",
   "version": "1.0",
   "description": "Text-to-Speech using Gemini API",
-  "permissions": ["activeTab", "scripting", "storage"],
+  "permissions": ["activeTab", "scripting", "storage", "offscreen"],
+  "background": {
+    "service_worker": "background.js"
+  },
   "action": {
     "default_popup": "popup.html",
     "default_title": "Speak Selection"
