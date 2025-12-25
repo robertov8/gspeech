@@ -44,7 +44,7 @@ async function handleFullProcess(payload) {
     const audioData = await fetchTTS(textToSpeak, apiKey, voice);
 
     // 3. Playback Step
-    // broadcastStatus("Iniciando reprodução...", "success", true); // Playback started, we can stop loading
+    broadcastStatus("Iniciando reprodução...", "success", true); // Playback started, we can stop loading
 
     // Instead of playing in background, send data to popup to play in <audio> tag
     chrome.runtime
