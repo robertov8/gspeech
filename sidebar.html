@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Gemini TTS</title>
-    <link rel="stylesheet" href="popup.css" />
+    <link rel="stylesheet" href="sidebar.css" />
     <link
       rel="stylesheet"
       href="https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;700&display=swap"
@@ -53,44 +53,20 @@
         </div>
         <div class="input-group">
           <label for="language-select">Idioma do Texto</label>
-          <select
-            id="language-select"
-            style="
-              width: 100%;
-              padding: 8px;
-              border: 1px solid #dadce0;
-              border-radius: 4px;
-            "
-          >
+          <select id="language-select">
             <option value="pt-BR">Português (Brasil)</option>
             <option value="en">Inglês</option>
           </select>
         </div>
         <div class="input-group">
           <label for="voice-select">Voz</label>
-          <select
-            id="voice-select"
-            style="
-              width: 100%;
-              padding: 8px;
-              border: 1px solid #dadce0;
-              border-radius: 4px;
-            "
-          >
+          <select id="voice-select">
             <!-- Options will be populated by JS -->
           </select>
         </div>
         <div class="input-group">
           <label for="theme-select">Tema</label>
-          <select
-            id="theme-select"
-            style="
-              width: 100%;
-              padding: 8px;
-              border: 1px solid #dadce0;
-              border-radius: 4px;
-            "
-          >
+          <select id="theme-select">
             <option value="system">Sistema</option>
             <option value="light">Claro</option>
             <option value="dark">Escuro</option>
@@ -100,30 +76,35 @@
       </div>
 
       <div class="content">
-        <div class="text-source">
-          <textarea
-            id="captured-text"
-            readonly
-            placeholder="Selecione um texto na página e reabra a extensão..."
-          ></textarea>
-        </div>
-        <div id="translated-container" class="text-source hidden">
-          <div
-            class="lang-label"
-            style="
-              font-size: 12px;
-              color: var(--secondary-text-color);
-              margin-bottom: 4px;
-            "
-          >
-            Tradução:
+        <div class="text-area-container">
+          <div class="text-source">
+            <textarea
+              id="captured-text"
+              readonly
+              placeholder="Selecione um texto na página e reabra a extensão..."
+            ></textarea>
           </div>
-          <textarea
-            id="translated-text"
-            readonly
-            placeholder="A tradução aparecerá aqui..."
-          ></textarea>
+          <div id="translated-container" class="text-source hidden">
+            <div
+              class="lang-label"
+              style="
+                font-size: 12px;
+                color: var(--secondary-text-color);
+                margin-bottom: 4px;
+              "
+            >
+              Tradução:
+            </div>
+            <textarea
+              id="translated-text"
+              readonly
+              placeholder="A tradução aparecerá aqui..."
+            ></textarea>
+          </div>
         </div>
+      </div>
+
+      <div class="footer">
         <div class="controls">
           <button id="play-btn" class="primary-btn" disabled>
             <span class="icon">
@@ -141,10 +122,11 @@
           </button>
           <div id="loader" class="loader hidden"></div>
         </div>
-      </div>
 
-      <div id="status-message"></div>
+        <audio id="audio-player" class="hidden" controls></audio>
+        <div id="status-message"></div>
+      </div>
     </div>
-    <script src="popup.js"></script>
+    <script src="sidebar.js"></script>
   </body>
 </html>

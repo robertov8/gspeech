@@ -196,8 +196,38 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   // Play button logic
   playBtn.addEventListener("click", async () => {
+    // 1. Re-capture text from active tab to ensure we have the latest selection
+    try {
+      const [tab] = await chrome.tabs.query({
+        active: true,
+        currentWindow: true,
+      });
+      if (tab && tab.id) {
+        // Ensure tab exists and has an ID
+        const [{ result }] = await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          function: () => window.getSelection().toString(),
+        });
+
+        if (result && result.trim()) {
+          const newText = result.trim();
+          capturedTextInput.value = newText;
+
+          // Save new text immediately
+          chrome.storage.local.set({ lastCapturedText: newText });
+        }
+        // If no new text selected, we keep whatever was already in the input (from persistence or previous capture)
+      }
+    } catch (err) {
+      console.error("Erro ao recapturar texto:", err);
+      // Continue execution - maybe user manually edited the text area or relies on previous text
+    }
+
     let text = capturedTextInput.value.trim();
-    if (!text) return;
+    if (!text) {
+      showStatus("Nenhum texto encontrado para ler.", "error");
+      return;
+    }
 
     const apiKey = contextKeyInput.value.trim();
     const selectedVoice = voiceSelect.value || "Aoede";
@@ -216,6 +246,14 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     // Clear persisted state
     chrome.storage.local.remove(["lastTranslatedText", "lastStatus"]);
+
+    // Reset audio player
+    const audioPlayer = document.getElementById("audio-player");
+    if (audioPlayer) {
+      audioPlayer.pause();
+      audioPlayer.src = "";
+      audioPlayer.classList.add("hidden");
+    }
 
     // Dispatch to background for full processing
     chrome.runtime.sendMessage(
@@ -258,15 +296,36 @@ document.addEventListener("DOMContentLoaded", async () => {
         chrome.storage.local.set({ lastTranslatedText: msg.data.text });
         translatedContainer.classList.remove("hidden");
       }
+    } else if (msg.type === "AUDIO_READY") {
+      const audioPlayer = document.getElementById("audio-player");
+      if (audioPlayer) {
+        const base64String = msg.data.audioData;
+        // Decode base64 to Blob
+        const binaryString = atob(base64String);
+        const pcmData = new Uint8Array(binaryString.length);
+        for (let i = 0; i < binaryString.length; i++) {
+          pcmData[i] = binaryString.charCodeAt(i);
+        }
+        // Add WAV header for browser playback
+        // (Reusing the addWavHeader logic - need to duplicate it or move to shared,
+        // but for now I will paste the helper here to keep it self-contained in this tool call context
+        // OR simply play the raw if browser supports it? Chrome needs WAV container typically for raw PCM)
+
+        // Wait, previously offscreen.js had the wav header logic. I need it here too.
+        const wavData = addWavHeader(pcmData, 24000, 1, 16);
+        const blob = new Blob([wavData], { type: "audio/wav" });
+        const url = URL.createObjectURL(blob);
+
+        audioPlayer.src = url;
+        audioPlayer.classList.remove("hidden");
+        audioPlayer.play();
+      }
     }
   });
 
   // Toggle translated text area based on language selection
   function updateUIForLanguage() {
     if (languageSelect.value === "en") {
-      // We act optimistically; we show it empty or keep it hidden until translation arrives?
-      // User asked for a textarea "if language is English".
-      // Let's show the container but maybe empty.
       translatedContainer.classList.remove("hidden");
     } else {
       translatedContainer.classList.add("hidden");
@@ -293,5 +352,39 @@ document.addEventListener("DOMContentLoaded", async () => {
     statusMessage.textContent = msg;
     chrome.storage.local.set({ lastStatus: msg });
     statusMessage.style.color = type === "error" ? "#d93025" : "#188038";
+  }
+
+  // --- WAV Header Helper ---
+  function addWavHeader(pcmData, sampleRate, numChannels, bitsPerSample) {
+    const headerLength = 44;
+    const dataLength = pcmData.length;
+    const fileSize = dataLength + headerLength - 8;
+    const buffer = new ArrayBuffer(headerLength + dataLength);
+    const view = new DataView(buffer);
+
+    writeString(view, 0, "RIFF");
+    view.setUint32(4, fileSize, true);
+    writeString(view, 8, "WAVE");
+    writeString(view, 12, "fmt ");
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);
+    view.setUint16(22, numChannels, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate * numChannels * (bitsPerSample / 8), true);
+    view.setUint16(32, numChannels * (bitsPerSample / 8), true);
+    view.setUint16(34, bitsPerSample, true);
+    writeString(view, 36, "data");
+    view.setUint32(40, dataLength, true);
+
+    const pcmDataArray = new Uint8Array(buffer, headerLength);
+    pcmDataArray.set(pcmData);
+
+    return buffer;
+  }
+
+  function writeString(view, offset, string) {
+    for (let i = 0; i < string.length; i++) {
+      view.setUint8(offset + i, string.charCodeAt(i));
+    }
   }
 });

@@ -11,6 +11,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 });
 
+// Open Side Panel on Action Click
+chrome.action.onClicked.addListener((tab) => {
+  // Opens the side panel in the current window
+  chrome.sidePanel.open({ windowId: tab.windowId });
+});
+
 async function handleFullProcess(payload) {
   const { text, apiKey, voice, language } = payload;
   let textToSpeak = text;
@@ -38,9 +44,21 @@ async function handleFullProcess(payload) {
     const audioData = await fetchTTS(textToSpeak, apiKey, voice);
 
     // 3. Playback Step
-    broadcastStatus("Iniciando reprodução...", "success", true); // Playback started, we can stop loading
-    await handleAudioPlay(audioData, () => {});
-    broadcastStatus("Reprodução iniciada.", "success", true);
+    // broadcastStatus("Iniciando reprodução...", "success", true); // Playback started, we can stop loading
+
+    // Instead of playing in background, send data to popup to play in <audio> tag
+    chrome.runtime
+      .sendMessage({
+        type: "AUDIO_READY",
+        data: { audioData: audioData },
+      })
+      .catch(() => {});
+
+    broadcastStatus("Áudio pronto para ouvir.", "success", true);
+
+    // Legacy/Fallback: If we wanted to keep background playback we would call handleAudioPlay here.
+    // But user requested specific controls in UI.
+    // await handleAudioPlay(audioData, () => {});
   } catch (error) {
     console.error("Background processing error:", error);
     broadcastStatus(`Erro: ${error.message}`, "error", true);
