@@ -8,6 +8,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   const contextKeyInput = document.getElementById("api-key");
   const voiceSelect = document.getElementById("voice-select");
   const languageSelect = document.getElementById("language-select");
+  const englishBehaviorSelect = document.getElementById("english-behavior");
   const themeSelect = document.getElementById("theme-select");
   const saveKeyBtn = document.getElementById("save-key");
   const statusMessage = document.getElementById("status-message");
@@ -64,6 +65,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       "theme",
       "lastTranslatedText",
       "lastStatus",
+      "englishBehavior",
     ],
     (result) => {
       if (result.geminiApiKey) {
@@ -84,6 +86,10 @@ document.addEventListener("DOMContentLoaded", async () => {
 
       if (result.selectedLanguage) {
         languageSelect.value = result.selectedLanguage;
+      }
+
+      if (result.englishBehavior) {
+        englishBehaviorSelect.value = result.englishBehavior;
       }
 
       updateUIForLanguage(); // Init state
@@ -141,6 +147,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     const key = contextKeyInput.value.trim();
     const voice = voiceSelect.value;
     const language = languageSelect.value;
+    const englishBehavior = englishBehaviorSelect.value;
     const theme = themeSelect.value;
 
     if (key) {
@@ -150,6 +157,7 @@ document.addEventListener("DOMContentLoaded", async () => {
           geminiApiKey: key,
           selectedVoice: voice,
           selectedLanguage: language,
+          englishBehavior: englishBehavior,
           theme: theme,
         },
         () => {
@@ -232,6 +240,8 @@ document.addEventListener("DOMContentLoaded", async () => {
     const apiKey = contextKeyInput.value.trim();
     const selectedVoice = voiceSelect.value || "Aoede";
     const selectedLanguage = languageSelect.value || "pt-BR";
+    const selectedEnglishBehavior =
+      englishBehaviorSelect.value || "translate_listen";
 
     if (!apiKey) {
       showStatus("API Key é necessária.", "error");
@@ -264,6 +274,7 @@ document.addEventListener("DOMContentLoaded", async () => {
           apiKey: apiKey,
           voice: selectedVoice,
           language: selectedLanguage,
+          englishBehavior: selectedEnglishBehavior,
         },
       },
       (response) => {
@@ -323,13 +334,19 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   });
 
-  // Toggle translated text area based on language selection
+  // Toggle translated text area AND english behavior settings based on language
   function updateUIForLanguage() {
+    const englishBehaviorGroup = document.getElementById(
+      "english-behavior-group"
+    );
+
     if (languageSelect.value === "en") {
       translatedContainer.classList.remove("hidden");
+      if (englishBehaviorGroup) englishBehaviorGroup.classList.remove("hidden");
     } else {
       translatedContainer.classList.add("hidden");
       translatedTextInput.value = "";
+      if (englishBehaviorGroup) englishBehaviorGroup.classList.add("hidden");
     }
   }
 

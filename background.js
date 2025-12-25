@@ -37,6 +37,16 @@ async function handleFullProcess(payload) {
         .catch(() => {});
 
       broadcastStatus("Tradução concluída.", "success");
+
+      // Check user preference for English
+      if (payload.englishBehavior === "translate_only") {
+        broadcastStatus(
+          "Traduzido (Áudio ignorado nas configurações).",
+          "success",
+          true
+        );
+        return; // STOP HERE
+      }
     }
 
     // 2. TTS Generation Step
