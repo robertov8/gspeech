@@ -6,6 +6,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   const settingsBtn = document.getElementById("settings-btn");
   const settingsPanel = document.getElementById("settings-panel");
   const contextKeyInput = document.getElementById("api-key");
+  const wrapperUrlInput = document.getElementById("wrapper-url");
   const voiceSelect = document.getElementById("voice-select");
   const languageSelect = document.getElementById("language-select");
   const englishBehaviorSelect = document.getElementById("english-behavior");
@@ -66,6 +67,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       "lastTranslatedText",
       "lastStatus",
       "englishBehavior",
+      "wrapperUrl",
     ],
     (result) => {
       if (result.geminiApiKey) {
@@ -77,6 +79,12 @@ document.addEventListener("DOMContentLoaded", async () => {
         );
         settingsPanel.classList.remove("hidden");
       }
+
+      if (result.wrapperUrl) {
+        wrapperUrlInput.value = result.wrapperUrl;
+      }
+
+      updateUIForWrapper(); // Apply UI constraints
 
       if (result.selectedVoice) {
         voiceSelect.value = result.selectedVoice;
@@ -93,6 +101,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       }
 
       updateUIForLanguage(); // Init state
+      updatePlayButtonText(); // Init button text
 
       if (result.theme) {
         themeSelect.value = result.theme;
@@ -137,6 +146,53 @@ document.addEventListener("DOMContentLoaded", async () => {
       }
     });
 
+  // Toggle settings based on Wrapper URL
+  function updateUIForWrapper() {
+    const hasWrapper = wrapperUrlInput.value.trim().length > 0;
+
+    contextKeyInput.disabled = hasWrapper;
+    voiceSelect.disabled = hasWrapper;
+
+    if (englishBehaviorSelect) {
+      englishBehaviorSelect.disabled = hasWrapper;
+      if (hasWrapper) {
+        englishBehaviorSelect.value = "translate_only";
+      }
+    }
+    updatePlayButtonText();
+  }
+
+  wrapperUrlInput.addEventListener("input", updateUIForWrapper);
+  if (englishBehaviorSelect) {
+    englishBehaviorSelect.addEventListener("change", updatePlayButtonText);
+  }
+
+  function updatePlayButtonText() {
+    const playBtnText = playBtn.querySelector(".text");
+    if (!playBtnText) return;
+
+    const hasWrapper = wrapperUrlInput.value.trim().length > 0;
+    const isEnglish = languageSelect.value === "en";
+
+    if (hasWrapper) {
+      playBtnText.textContent = "Traduzir";
+      return;
+    }
+
+    if (isEnglish) {
+      const behavior = englishBehaviorSelect
+        ? englishBehaviorSelect.value
+        : "translate_listen";
+      if (behavior === "translate_only") {
+        playBtnText.textContent = "Traduzir";
+      } else {
+        playBtnText.textContent = "Traduzir e Ouvir";
+      }
+    } else {
+      playBtnText.textContent = "Ouvir";
+    }
+  }
+
   // Toggle settings
   settingsBtn.addEventListener("click", () => {
     settingsPanel.classList.toggle("hidden");
@@ -145,8 +201,10 @@ document.addEventListener("DOMContentLoaded", async () => {
   // Save settings
   saveKeyBtn.addEventListener("click", () => {
     const key = contextKeyInput.value.trim();
+    const wrapper = wrapperUrlInput.value.trim();
     const voice = voiceSelect.value;
     const language = languageSelect.value;
+
     const englishBehavior = englishBehaviorSelect.value;
     const theme = themeSelect.value;
 
@@ -155,6 +213,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       chrome.storage.local.set(
         {
           geminiApiKey: key,
+          wrapperUrl: wrapper,
           selectedVoice: voice,
           selectedLanguage: language,
           englishBehavior: englishBehavior,
@@ -238,12 +297,17 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
 
     const apiKey = contextKeyInput.value.trim();
+    const wrapperUrl = wrapperUrlInput.value.trim();
     const selectedVoice = voiceSelect.value || "Aoede";
     const selectedLanguage = languageSelect.value || "pt-BR";
     const selectedEnglishBehavior =
       englishBehaviorSelect.value || "translate_listen";
 
-    if (!apiKey) {
+    // If Wrapper is used, API Key might not be strictly required for the first step,
+    // but strictly speaking current implementation of fetchTTS needs it.
+    // However, user requested to DISABLE the input, which implies they might not provide it.
+    // We will allow proceeding if wrapperUrl is present.
+    if (!apiKey && !wrapperUrl) {
       showStatus("API Key é necessária.", "error");
       settingsPanel.classList.remove("hidden");
       return;
@@ -272,6 +336,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         payload: {
           text: text,
           apiKey: apiKey,
+          wrapperUrl: wrapperUrl,
           voice: selectedVoice,
           language: selectedLanguage,
           englishBehavior: selectedEnglishBehavior,
@@ -348,6 +413,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       translatedTextInput.value = "";
       if (englishBehaviorGroup) englishBehaviorGroup.classList.add("hidden");
     }
+    updatePlayButtonText();
   }
 
   languageSelect.addEventListener("change", updateUIForLanguage);

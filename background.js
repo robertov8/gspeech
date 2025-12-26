@@ -18,14 +18,14 @@ chrome.action.onClicked.addListener((tab) => {
 });
 
 async function handleFullProcess(payload) {
-  const { text, apiKey, voice, language } = payload;
+  const { text, apiKey, wrapperUrl, voice, language } = payload;
   let textToSpeak = text;
 
   try {
     // 1. Translation Step (if needed)
     if (language === "en") {
       broadcastStatus("Traduzindo para Português...", "success");
-      textToSpeak = await translateText(textToSpeak, apiKey);
+      textToSpeak = await translateText(textToSpeak, apiKey, wrapperUrl);
       if (!textToSpeak) throw new Error("Translation failed");
 
       // Broadcast translated text
@@ -50,6 +50,11 @@ async function handleFullProcess(payload) {
     }
 
     // 2. TTS Generation Step
+    if (wrapperUrl) {
+      broadcastStatus("Áudio ignorado (Uso de Wrapper).", "success", true);
+      return;
+    }
+
     broadcastStatus("Gerando áudio...", "success");
     const audioData = await fetchTTS(textToSpeak, apiKey, voice);
 
@@ -87,36 +92,70 @@ function broadcastStatus(message, type, finished = false) {
     });
 }
 
-async function translateText(text, apiKey) {
+async function translateText(text, apiKey, wrapperUrl) {
+  let url, method, body, headers;
   try {
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          contents: [
-            {
-              parts: [
-                {
-                  text: `Translate the following text to Portuguese (Brazil). Return ONLY the translated text, nothing else:\n\n${text}`,
-                },
-              ],
-            },
-          ],
-        }),
+    if (wrapperUrl) {
+      // Use Local Wrapper
+      url = wrapperUrl.trim();
+      if (!url.startsWith("http://") && !url.startsWith("https://")) {
+        url = `http://${url}`;
       }
-    );
 
-    if (!response.ok) throw new Error("Translation API failed");
+      method = "POST";
+      headers = { "Content-Type": "application/json" };
+      body = JSON.stringify({
+        prompt: `Translate the following text to Portuguese (Brazil). Return ONLY the translated text, nothing else:\n\n${text}`,
+      });
+    } else {
+      // Use Google Gemini API
+      url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+      method = "POST";
+      headers = { "Content-Type": "application/json" };
+      body = JSON.stringify({
+        contents: [
+          {
+            parts: [
+              {
+                text: `Translate the following text to Portuguese (Brazil). Return ONLY the translated text, nothing else:\n\n${text}`,
+              },
+            ],
+          },
+        ],
+      });
+    }
+
+    const response = await fetch(url, { method, headers, body });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(
+        `Translation API failed: ${response.status} - ${errText}`
+      );
+    }
 
     const data = await response.json();
-    const translatedText = data.candidates?.[0]?.content?.parts?.[0]?.text;
+    let translatedText;
+
+    if (wrapperUrl) {
+      // Wrapper Format
+      translatedText = data.response;
+    } else {
+      // Gemini API Format
+      translatedText = data.candidates?.[0]?.content?.parts?.[0]?.text;
+    }
+
     return translatedText ? translatedText.trim() : null;
   } catch (e) {
-    console.error("Translation error:", e);
+    console.error(`Translation error (URL: ${url}):`, e);
+
+    // Add more context to the error for the user
+    if (e.message.includes("Failed to fetch")) {
+      throw new Error(
+        `Falha de conexão com o Wrapper em: ${url}. Verifique se o servidor está rodando e a URL está correta.`
+      );
+    }
+
     throw e;
   }
 }

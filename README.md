@@ -9,11 +9,17 @@ Uma extensão poderosa para Google Chrome que converte texto selecionado em fala
 - **Tradução Automática Configurável**:
   - Se o texto selecionado estiver em inglês, a extensão traduz para Português.
   - **Novo**: Configure se deseja **"Traduzir e Ouvir"** (padrão) ou **"Apenas Traduzir"** (ideal para economizar tempo).
+- **Suporte a Wrapper Local (CLI)**:
+  - Configure uma URL local (ex: `http://localhost:8000`) para delegar a tradução para um serviço próprio (economiza requisições à API do Google).
+  - Quando ativado, a extensão prioriza a tradução, desativa a geração de áudio (cost-saving) e bloqueia campos desnecessários.
+- **Interface Dinâmica**:
+  - O botão de ação muda de texto ("Ouvir", "Traduzir", "Traduzir e Ouvir") para indicar claramente o que acontecerá.
+  - Campos de API Key e Voz são desabilitados automaticamente ao usar um Wrapper para evitar confusão.
 - **Seleção de Vozes**: Escolha entre diversas personalidades de voz do Gemini (Zephyr, Puck, Aoede, etc.).
 - **Temas**: Suporte a tema Claro, Escuro e Automático (Seguindo o sistema).
 - **Captura Inteligente**:
   - Selecione um texto e abra a extensão para capturar.
-  - Já com a extensão aberta, selecione um novo texto e clique em **"Ouvir"** para atualizar e ler imediatamente.
+  - Já com a extensão aberta, selecione um novo texto e clique no botão de ação para atualizar e processar imediatamente.
 - **Player de Áudio Dedicado**: Controles visuais de reprodução (Play, Pause, Volume, Barra de progresso).
 - **Persistência**: Lembra suas configurações, último texto lido e tradução mesmo após fechar o navegador.
 
@@ -33,9 +39,10 @@ Para usar a extensão, você precisará de uma chave de API do Google Gemini gra
 2. Clique no ícone da extensão **GSpeech** na barra de ferramentas (Isso abrirá o Painel Lateral).
 3. No topo do painel, clique no ícone de **engrenagem (Configurações)**.
 4. Cole sua **Gemini API Key**.
-5. (Opcional) Escolha sua voz preferida e idioma padrão.
-6. **(Novo) Comportamento para Inglês**: Escolha se deseja ouvir o áudio após a tradução ou apenas ler o texto traduzido.
-7. Clique em **Salvar**.
+5. **(Opcional) URL do Wrapper**: Se tiver um serviço local compatível, cole a URL (ex: `http://localhost:8000/api/generate`). Isso desabilitará a geração de áudio e usará seu serviço para tradução.
+6. (Opcional) Escolha sua voz preferida e idioma padrão.
+7. **(Novo) Comportamento para Inglês**: Escolha se deseja ouvir o áudio após a tradução ou apenas ler o texto traduzido.
+8. Clique em **Salvar**.
 
 ## 🖥️ Como Usar
 
