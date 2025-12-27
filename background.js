@@ -24,24 +24,33 @@ async function handleFullProcess(payload) {
   try {
     // 1. Translation Step (if needed)
     if (language === "en") {
-      broadcastStatus("Traduzindo para Português...", "success");
-      textToSpeak = await translateText(textToSpeak, apiKey, wrapperUrl);
+      broadcastStatus("Traduzindo para Português...", "success", false, true);
+      const { text: translated, duration } = await translateText(
+        textToSpeak,
+        apiKey,
+        wrapperUrl
+      );
+      textToSpeak = translated;
+
       if (!textToSpeak) throw new Error("Translation failed");
 
       // Broadcast translated text
       chrome.runtime
         .sendMessage({
           type: "TRANSLATION_COMPLETE",
-          data: { text: textToSpeak },
+          data: { text: textToSpeak, duration: duration },
         })
         .catch(() => {});
 
-      broadcastStatus("Tradução concluída.", "success");
+      broadcastStatus(
+        `Tradução concluída (${formatDuration(duration)}).`,
+        "success"
+      );
 
       // Check user preference for English
       if (payload.englishBehavior === "translate_only") {
         broadcastStatus(
-          "Traduzido (Áudio ignorado nas configurações).",
+          `Traduzido (${formatDuration(duration)}) - Áudio ignorado.`,
           "success",
           true
         );
@@ -55,21 +64,30 @@ async function handleFullProcess(payload) {
       return;
     }
 
-    broadcastStatus("Gerando áudio...", "success");
-    const audioData = await fetchTTS(textToSpeak, apiKey, voice);
+    broadcastStatus("Gerando áudio...", "success", false, true);
+    const { audioData, duration } = await fetchTTS(textToSpeak, apiKey, voice);
 
     // 3. Playback Step
-    broadcastStatus("Iniciando reprodução...", "success", true); // Playback started, we can stop loading
+    broadcastStatus(
+      `Iniciando reprodução... (${formatDuration(duration)})`,
+      "success",
+      true,
+      true
+    ); // Playback started, we can stop loading
 
     // Instead of playing in background, send data to popup to play in <audio> tag
     chrome.runtime
       .sendMessage({
         type: "AUDIO_READY",
-        data: { audioData: audioData },
+        data: { audioData: audioData, duration: duration },
       })
       .catch(() => {});
 
-    broadcastStatus("Áudio pronto para ouvir.", "success", true);
+    broadcastStatus(
+      `Áudio pronto para ouvir (${formatDuration(duration)}).`,
+      "success",
+      true
+    );
 
     // Legacy/Fallback: If we wanted to keep background playback we would call handleAudioPlay here.
     // But user requested specific controls in UI.
@@ -80,16 +98,23 @@ async function handleFullProcess(payload) {
   }
 }
 
-function broadcastStatus(message, type, finished = false) {
+function broadcastStatus(message, type, finished = false, isProgress = false) {
   // Send message to popup if it is open
   chrome.runtime
     .sendMessage({
       type: "STATUS_UPDATE",
-      data: { message, type, finished },
+      data: { message, type, finished, isProgress },
     })
     .catch(() => {
       // Ignore error if popup is closed and cannot receive message
     });
+}
+
+function formatDuration(ms) {
+  if (ms > 1000) {
+    return `${(ms / 1000).toFixed(1)}s`;
+  }
+  return `${ms}ms`;
 }
 
 async function translateText(text, apiKey, wrapperUrl) {
@@ -125,7 +150,10 @@ async function translateText(text, apiKey, wrapperUrl) {
       });
     }
 
+    const startTime = performance.now();
     const response = await fetch(url, { method, headers, body });
+    const endTime = performance.now();
+    const duration = Math.round(endTime - startTime);
 
     if (!response.ok) {
       const errText = await response.text();
@@ -145,7 +173,7 @@ async function translateText(text, apiKey, wrapperUrl) {
       translatedText = data.candidates?.[0]?.content?.parts?.[0]?.text;
     }
 
-    return translatedText ? translatedText.trim() : null;
+    return { text: translatedText ? translatedText.trim() : null, duration };
   } catch (e) {
     console.error(`Translation error (URL: ${url}):`, e);
 
@@ -161,6 +189,7 @@ async function translateText(text, apiKey, wrapperUrl) {
 }
 
 async function fetchTTS(text, apiKey, voice) {
+  const startTime = performance.now();
   const response = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${apiKey}`,
     {
@@ -187,6 +216,8 @@ async function fetchTTS(text, apiKey, voice) {
       }),
     }
   );
+  const endTime = performance.now();
+  const duration = Math.round(endTime - startTime);
 
   if (!response.ok) {
     const errData = await response.json();
@@ -208,7 +239,7 @@ async function fetchTTS(text, apiKey, voice) {
     part.inlineData &&
     (part.inlineData.mimeType.startsWith("audio") || true)
   ) {
-    return part.inlineData.data;
+    return { audioData: part.inlineData.data, duration };
   } else {
     throw new Error(
       "Formato de resposta inesperado do Gemini ou texto retornado."

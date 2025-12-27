@@ -351,7 +351,7 @@ document.addEventListener("DOMContentLoaded", async () => {
           setLoading(false);
         } else {
           // Task started successfully
-          showStatus("Processando em segundo plano...", "success");
+          // showStatus("Processando em segundo plano...", "success"); // Removed to avoid overwriting live timer
         }
       }
     );
@@ -360,7 +360,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   // Listen for status updates from background
   chrome.runtime.onMessage.addListener((msg) => {
     if (msg.type === "STATUS_UPDATE") {
-      showStatus(msg.data.message, msg.data.type);
+      showStatus(msg.data.message, msg.data.type, msg.data.isProgress);
 
       // Stop loading if error or explicitly finished
       if (msg.data.type === "error" || msg.data.finished) {
@@ -431,10 +431,44 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   }
 
-  function showStatus(msg, type) {
+  let statusTimer = null;
+  let statusStartTime = 0;
+  let currentStatusBaseMsg = "";
+
+  function showStatus(msg, type, isProgress = false) {
+    if (statusTimer) {
+      clearInterval(statusTimer);
+      statusTimer = null;
+    }
+
     statusMessage.textContent = msg;
-    chrome.storage.local.set({ lastStatus: msg });
     statusMessage.style.color = type === "error" ? "#d93025" : "#188038";
+
+    // Save plain message for persistence (without ticking time)
+    // Actually, we persist the final result usually.
+    // If it's a progress message, we don't necessarily need to persist it forever,
+    // but we can save it.
+    chrome.storage.local.set({ lastStatus: msg });
+
+    if (isProgress) {
+      currentStatusBaseMsg = msg;
+      statusStartTime = Date.now();
+
+      statusTimer = setInterval(() => {
+        const now = Date.now();
+        const elapsed = now - statusStartTime;
+        statusMessage.textContent = `${currentStatusBaseMsg} ${formatLiveDuration(
+          elapsed
+        )}`;
+      }, 100);
+    }
+  }
+
+  function formatLiveDuration(ms) {
+    if (ms > 1000) {
+      return `(${(ms / 1000).toFixed(1)}s)`;
+    }
+    return `(${ms}ms)`;
   }
 
   // --- WAV Header Helper ---
