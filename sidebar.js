@@ -67,7 +67,10 @@ document.addEventListener("DOMContentLoaded", async () => {
       "lastTranslatedText",
       "lastStatus",
       "englishBehavior",
+      "lastStatus",
+      "englishBehavior",
       "wrapperUrl",
+      "shouldAutoPlay",
     ],
     (result) => {
       if (result.geminiApiKey) {
@@ -123,6 +126,19 @@ document.addEventListener("DOMContentLoaded", async () => {
 
       if (result.lastStatus) {
         showStatus(result.lastStatus, "success");
+      }
+
+      // Auto-Play Logic (if opened via FAB)
+      if (result.shouldAutoPlay) {
+        // Clear flag immediately
+        chrome.storage.local.set({ shouldAutoPlay: false });
+
+        // Trigger play if we have text
+        if (capturedTextInput.value.trim()) {
+          setTimeout(() => {
+            handlePlay(false);
+          }, 1000); // Delay to ensure UI/State is ready
+        }
       }
     }
   );
@@ -262,32 +278,86 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   // Play button logic
-  playBtn.addEventListener("click", async () => {
-    // 1. Re-capture text from active tab to ensure we have the latest selection
-    try {
-      const [tab] = await chrome.tabs.query({
-        active: true,
-        currentWindow: true,
-      });
-      if (tab && tab.id) {
-        // Ensure tab exists and has an ID
-        const [{ result }] = await chrome.scripting.executeScript({
-          target: { tabId: tab.id },
-          function: () => window.getSelection().toString(),
+  // Play button logic
+  playBtn.addEventListener("click", () => handlePlay(true));
+
+  async function handlePlay(shouldRecapture = true) {
+    // 1. Re-capture text from active tab (only if requested)
+    if (shouldRecapture) {
+      try {
+        const [tab] = await chrome.tabs.query({
+          active: true,
+          currentWindow: true,
         });
+        if (tab && tab.id) {
+          const [{ result }] = await chrome.scripting.executeScript({
+            target: { tabId: tab.id },
+            function: () => {
+              const selection = window.getSelection();
+              if (selection.rangeCount === 0) return "";
 
-        if (result && result.trim()) {
-          const newText = result.trim();
-          capturedTextInput.value = newText;
+              const container = document.createElement("div");
+              for (let i = 0; i < selection.rangeCount; i++) {
+                container.appendChild(selection.getRangeAt(i).cloneContents());
+              }
 
-          // Save new text immediately
-          chrome.storage.local.set({ lastCapturedText: newText });
+              function getFormattedText(node) {
+                let text = "";
+                for (const child of node.childNodes) {
+                  if (child.nodeType === Node.TEXT_NODE) {
+                    text += child.textContent;
+                  } else if (child.nodeType === Node.ELEMENT_NODE) {
+                    const tagName = child.tagName.toLowerCase();
+                    const isBlock = [
+                      "p",
+                      "div",
+                      "h1",
+                      "h2",
+                      "h3",
+                      "h4",
+                      "h5",
+                      "h6",
+                      "li",
+                      "tr",
+                      "br",
+                    ].includes(tagName);
+
+                    if (isBlock && text.length > 0 && !text.endsWith("\n")) {
+                      text += "\n";
+                    }
+
+                    if (tagName === "li") {
+                      text += "• ";
+                    }
+
+                    text += getFormattedText(child);
+
+                    if (isBlock && !text.endsWith("\n")) {
+                      text += "\n";
+                    }
+                    if (tagName === "p" && !text.endsWith("\n\n")) {
+                      text += "\n";
+                    }
+                  }
+                }
+                return text.replace(/ +/g, " ");
+              }
+
+              return getFormattedText(container);
+            },
+          });
+
+          if (result && result.trim()) {
+            const newText = result.trim();
+            capturedTextInput.value = newText;
+
+            // Save new text immediately
+            chrome.storage.local.set({ lastCapturedText: newText });
+          }
         }
-        // If no new text selected, we keep whatever was already in the input (from persistence or previous capture)
+      } catch (err) {
+        console.error("Erro ao recapturar texto:", err);
       }
-    } catch (err) {
-      console.error("Erro ao recapturar texto:", err);
-      // Continue execution - maybe user manually edited the text area or relies on previous text
     }
 
     let text = capturedTextInput.value.trim();
@@ -303,10 +373,6 @@ document.addEventListener("DOMContentLoaded", async () => {
     const selectedEnglishBehavior =
       englishBehaviorSelect.value || "translate_listen";
 
-    // If Wrapper is used, API Key might not be strictly required for the first step,
-    // but strictly speaking current implementation of fetchTTS needs it.
-    // However, user requested to DISABLE the input, which implies they might not provide it.
-    // We will allow proceeding if wrapperUrl is present.
     if (!apiKey && !wrapperUrl) {
       showStatus("API Key é necessária.", "error");
       settingsPanel.classList.remove("hidden");
@@ -315,13 +381,10 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     setLoading(true);
     showStatus("", "");
-    // Clear previous translation locally
     translatedTextInput.value = "";
 
-    // Clear persisted state
     chrome.storage.local.remove(["lastTranslatedText", "lastStatus"]);
 
-    // Reset audio player
     const audioPlayer = document.getElementById("audio-player");
     if (audioPlayer) {
       audioPlayer.pause();
@@ -329,7 +392,6 @@ document.addEventListener("DOMContentLoaded", async () => {
       audioPlayer.classList.add("hidden");
     }
 
-    // Dispatch to background for full processing
     chrome.runtime.sendMessage(
       {
         type: "START_PROCESS",
@@ -350,12 +412,11 @@ document.addEventListener("DOMContentLoaded", async () => {
           );
           setLoading(false);
         } else {
-          // Task started successfully
-          // showStatus("Processando em segundo plano...", "success"); // Removed to avoid overwriting live timer
+          // Started
         }
       }
     );
-  });
+  }
 
   // Listen for status updates from background
   chrome.runtime.onMessage.addListener((msg) => {
@@ -396,6 +457,21 @@ document.addEventListener("DOMContentLoaded", async () => {
         audioPlayer.classList.remove("hidden");
         audioPlayer.play();
       }
+    } else if (msg.type === "TEXT_CAPTURED_FROM_PAGE") {
+      const newText = msg.data.text;
+      if (capturedTextInput) {
+        capturedTextInput.value = newText;
+      }
+      chrome.storage.local.set({ lastCapturedText: newText });
+      playBtn.disabled = false;
+
+      // Auto-play immediately since panel is open
+      handlePlay(false);
+
+      // Ensure flag is cleared (wait for background to set it first to avoid race)
+      setTimeout(() => {
+        chrome.storage.local.set({ shouldAutoPlay: false });
+      }, 500);
     }
   });
 

@@ -8,6 +8,20 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     handleFullProcess(msg.payload);
     sendResponse({ success: true }); // Acknowledge immediately
     return false;
+  } else if (msg.type === "TEXT_CAPTURED_FROM_PAGE") {
+    // Save to storage immediately, and flag for auto-play
+    chrome.storage.local.set({
+      lastCapturedText: msg.data.text,
+      shouldAutoPlay: true,
+    });
+
+    // Attempt to open side panel
+    // Note: This requires the sender tab ID
+    if (sender.tab && sender.tab.id) {
+      chrome.sidePanel
+        .open({ tabId: sender.tab.id, windowId: sender.tab.windowId })
+        .catch((err) => console.log("Could not open side panel:", err));
+    }
   }
 });
 
