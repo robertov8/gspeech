@@ -15,46 +15,40 @@ document.addEventListener("DOMContentLoaded", async () => {
   const statusMessage = document.getElementById("status-message");
   const loader = document.getElementById("loader");
 
-  const voices = [
-    { name: "Zephyr", desc: "Bright" },
-    { name: "Puck", desc: "Upbeat" },
-    // { name: "Charon", desc: "Informativa" },
-    { name: "Kore", desc: "Firme" },
-    { name: "Fenrir", desc: "Excitável" },
-    { name: "Leda", desc: "Juventude" },
-    { name: "Orus", desc: "Firm" },
-    { name: "Aoede", desc: "Breezy" },
-    { name: "Callirrhoe", desc: "Tranquila" },
-    { name: "Autonoe", desc: "Bright" },
-    { name: "Enceladus", desc: "Breathy" },
-    { name: "Iapetus", desc: "Limpar" },
-    { name: "Umbriel", desc: "Tranquilo" },
-    { name: "Algieba", desc: "Suave" },
-    { name: "Despina", desc: "Smooth" },
-    { name: "Erinome", desc: "Limpar" },
-    { name: "Algenib", desc: "Gravelly" },
-    { name: "Rasalgethi", desc: "Informativa" },
-    { name: "Laomedeia", desc: "Upbeat" },
-    { name: "Achernar", desc: "Suave" },
-    { name: "Alnilam", desc: "Firme" },
-    { name: "Schedar", desc: "Even" },
-    { name: "Gacrux", desc: "Adulto" },
-    { name: "Pulcherrima", desc: "Avançar" },
-    { name: "Achird", desc: "Amigável" },
-    { name: "Zubenelgenubi", desc: "Casual" },
-    { name: "Vindemiatrix", desc: "Gentil" },
-    { name: "Sadachbia", desc: "Lively" },
-    { name: "Sadaltager", desc: "Conhecedor" },
-    { name: "Sulafat", desc: "Quente" },
-  ];
+  let statusTimer = null;
+  let statusStartTime = 0;
+  let currentStatusBaseMsg = "";
 
-  // Populate voice select
-  voices.forEach((voice) => {
-    const option = document.createElement("option");
-    option.value = voice.name;
-    option.textContent = `${voice.name} (${voice.desc})`;
-    voiceSelect.appendChild(option);
-  });
+  // Populate system voices
+  function loadSystemVoices() {
+    voiceSelect.innerHTML = "";
+    const voices = window.speechSynthesis.getVoices();
+
+    // Sort voices by language first, then by name
+    voices.sort((a, b) => {
+      if (a.lang !== b.lang) {
+        return a.lang.localeCompare(b.lang);
+      }
+      return a.name.localeCompare(b.name);
+    });
+
+    voices.forEach((voice) => {
+      const option = document.createElement("option");
+      option.value = voice.name; // We use name as ID for simplicity
+      option.textContent = `${voice.lang} - ${voice.name}`;
+      option.setAttribute("data-lang", voice.lang);
+      option.setAttribute("data-name", voice.name);
+      voiceSelect.appendChild(option);
+    });
+
+    // Try to restore selection or select default for current language in updateUIForLanguage
+    updateUIForLanguage();
+  }
+
+  loadSystemVoices();
+  if (speechSynthesis.onvoiceschanged !== undefined) {
+    speechSynthesis.onvoiceschanged = loadSystemVoices;
+  }
 
   // Load saved settings and last text
   chrome.storage.local.get(
@@ -165,16 +159,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   // Toggle settings based on Wrapper URL
   function updateUIForWrapper() {
     const hasWrapper = wrapperUrlInput.value.trim().length > 0;
-
     contextKeyInput.disabled = hasWrapper;
-    voiceSelect.disabled = hasWrapper;
-
-    if (englishBehaviorSelect) {
-      englishBehaviorSelect.disabled = hasWrapper;
-      if (hasWrapper) {
-        englishBehaviorSelect.value = "translate_only";
-      }
-    }
     updatePlayButtonText();
   }
 
@@ -187,13 +172,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     const playBtnText = playBtn.querySelector(".text");
     if (!playBtnText) return;
 
-    const hasWrapper = wrapperUrlInput.value.trim().length > 0;
     const isEnglish = languageSelect.value === "en";
-
-    if (hasWrapper) {
-      playBtnText.textContent = "Traduzir";
-      return;
-    }
 
     if (isEnglish) {
       const behavior = englishBehaviorSelect
@@ -360,6 +339,9 @@ document.addEventListener("DOMContentLoaded", async () => {
       }
     }
 
+    // Cancel any current speech
+    window.speechSynthesis.cancel();
+
     let text = capturedTextInput.value.trim();
     if (!text) {
       showStatus("Nenhum texto encontrado para ler.", "error");
@@ -368,7 +350,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     const apiKey = contextKeyInput.value.trim();
     const wrapperUrl = wrapperUrlInput.value.trim();
-    const selectedVoice = voiceSelect.value || "Aoede";
+    const selectedVoice = voiceSelect.value;
     const selectedLanguage = languageSelect.value || "pt-BR";
     const selectedEnglishBehavior =
       englishBehaviorSelect.value || "translate_listen";
@@ -379,85 +361,83 @@ document.addEventListener("DOMContentLoaded", async () => {
       return;
     }
 
-    setLoading(true);
-    showStatus("", "");
+    // Clear previous translation
     translatedTextInput.value = "";
-
     chrome.storage.local.remove(["lastTranslatedText", "lastStatus"]);
 
-    const audioPlayer = document.getElementById("audio-player");
-    if (audioPlayer) {
-      audioPlayer.pause();
-      audioPlayer.src = "";
-      audioPlayer.classList.add("hidden");
-    }
+    if (selectedLanguage === "en") {
+      setLoading(true);
+      showStatus("Traduzindo...", "success");
 
-    chrome.runtime.sendMessage(
-      {
-        type: "START_PROCESS",
-        payload: {
-          text: text,
-          apiKey: apiKey,
-          wrapperUrl: wrapperUrl,
-          voice: selectedVoice,
-          language: selectedLanguage,
-          englishBehavior: selectedEnglishBehavior,
+      chrome.runtime.sendMessage(
+        {
+          type: "TRANSLATE_TEXT",
+          payload: { text: text, apiKey: apiKey, wrapperUrl: wrapperUrl },
         },
-      },
-      (response) => {
-        if (chrome.runtime.lastError) {
-          showStatus(
-            `Erro ao iniciar: ${chrome.runtime.lastError.message}`,
-            "error"
-          );
+        (response) => {
           setLoading(false);
-        } else {
-          // Started
+
+          if (chrome.runtime.lastError) {
+            showStatus(`Erro: ${chrome.runtime.lastError.message}`, "error");
+            return;
+          }
+          if (response && response.error) {
+            showStatus(`Erro: ${response.error}`, "error");
+            return;
+          }
+
+          // Success
+          const translatedText = response.text;
+          const duration = response.duration;
+
+          translatedTextInput.value = translatedText;
+          translatedContainer.classList.remove("hidden");
+          chrome.storage.local.set({ lastTranslatedText: translatedText });
+
+          showStatus(
+            `Tradução concluída (${formatLiveDuration(duration)}).`,
+            "success"
+          );
+
+          if (selectedEnglishBehavior === "translate_listen") {
+            speakText(translatedText, selectedVoice);
+          }
         }
-      }
-    );
+      );
+    } else {
+      // PT-BR input, just speak
+      speakText(text, selectedVoice);
+    }
   }
 
-  // Listen for status updates from background
+  function speakText(text, voiceName) {
+    const utterance = new SpeechSynthesisUtterance(text);
+    const voices = window.speechSynthesis.getVoices();
+    const selectedVoice = voices.find((v) => v.name === voiceName);
+
+    if (selectedVoice) {
+      utterance.voice = selectedVoice;
+    }
+
+    utterance.onstart = () => {
+      showStatus("Reproduzindo...", "success");
+    };
+
+    utterance.onend = () => {
+      showStatus("Reprodução concluída.", "success");
+    };
+
+    utterance.onerror = (e) => {
+      showStatus("Erro na reprodução.", "error");
+      console.error("Speech error:", e);
+    };
+
+    window.speechSynthesis.speak(utterance);
+  }
+
+  // Listen for messages
   chrome.runtime.onMessage.addListener((msg) => {
-    if (msg.type === "STATUS_UPDATE") {
-      showStatus(msg.data.message, msg.data.type, msg.data.isProgress);
-
-      // Stop loading if error or explicitly finished
-      if (msg.data.type === "error" || msg.data.finished) {
-        setLoading(false);
-      }
-    } else if (msg.type === "TRANSLATION_COMPLETE") {
-      if (translatedTextInput && translatedContainer) {
-        translatedTextInput.value = msg.data.text;
-        chrome.storage.local.set({ lastTranslatedText: msg.data.text });
-        translatedContainer.classList.remove("hidden");
-      }
-    } else if (msg.type === "AUDIO_READY") {
-      const audioPlayer = document.getElementById("audio-player");
-      if (audioPlayer) {
-        const base64String = msg.data.audioData;
-        // Decode base64 to Blob
-        const binaryString = atob(base64String);
-        const pcmData = new Uint8Array(binaryString.length);
-        for (let i = 0; i < binaryString.length; i++) {
-          pcmData[i] = binaryString.charCodeAt(i);
-        }
-        // Add WAV header for browser playback
-        // (Reusing the addWavHeader logic - need to duplicate it or move to shared,
-        // but for now I will paste the helper here to keep it self-contained in this tool call context
-        // OR simply play the raw if browser supports it? Chrome needs WAV container typically for raw PCM)
-
-        // Wait, previously offscreen.js had the wav header logic. I need it here too.
-        const wavData = addWavHeader(pcmData, 24000, 1, 16);
-        const blob = new Blob([wavData], { type: "audio/wav" });
-        const url = URL.createObjectURL(blob);
-
-        audioPlayer.src = url;
-        audioPlayer.classList.remove("hidden");
-        audioPlayer.play();
-      }
-    } else if (msg.type === "TEXT_CAPTURED_FROM_PAGE") {
+    if (msg.type === "TEXT_CAPTURED_FROM_PAGE") {
       const newText = msg.data.text;
       if (capturedTextInput) {
         capturedTextInput.value = newText;
@@ -468,7 +448,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       // Auto-play immediately since panel is open
       handlePlay(false);
 
-      // Ensure flag is cleared (wait for background to set it first to avoid race)
+      // Ensure flag is cleared
       setTimeout(() => {
         chrome.storage.local.set({ shouldAutoPlay: false });
       }, 500);
@@ -507,10 +487,6 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   }
 
-  let statusTimer = null;
-  let statusStartTime = 0;
-  let currentStatusBaseMsg = "";
-
   function showStatus(msg, type, isProgress = false) {
     if (statusTimer) {
       clearInterval(statusTimer);
@@ -545,39 +521,5 @@ document.addEventListener("DOMContentLoaded", async () => {
       return `(${(ms / 1000).toFixed(1)}s)`;
     }
     return `(${ms}ms)`;
-  }
-
-  // --- WAV Header Helper ---
-  function addWavHeader(pcmData, sampleRate, numChannels, bitsPerSample) {
-    const headerLength = 44;
-    const dataLength = pcmData.length;
-    const fileSize = dataLength + headerLength - 8;
-    const buffer = new ArrayBuffer(headerLength + dataLength);
-    const view = new DataView(buffer);
-
-    writeString(view, 0, "RIFF");
-    view.setUint32(4, fileSize, true);
-    writeString(view, 8, "WAVE");
-    writeString(view, 12, "fmt ");
-    view.setUint32(16, 16, true);
-    view.setUint16(20, 1, true);
-    view.setUint16(22, numChannels, true);
-    view.setUint32(24, sampleRate, true);
-    view.setUint32(28, sampleRate * numChannels * (bitsPerSample / 8), true);
-    view.setUint16(32, numChannels * (bitsPerSample / 8), true);
-    view.setUint16(34, bitsPerSample, true);
-    writeString(view, 36, "data");
-    view.setUint32(40, dataLength, true);
-
-    const pcmDataArray = new Uint8Array(buffer, headerLength);
-    pcmDataArray.set(pcmData);
-
-    return buffer;
-  }
-
-  function writeString(view, offset, string) {
-    for (let i = 0; i < string.length; i++) {
-      view.setUint8(offset + i, string.charCodeAt(i));
-    }
   }
 });
